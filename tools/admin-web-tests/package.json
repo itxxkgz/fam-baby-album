@@ -1,0 +1,8 @@
+{
+  "name": "fam-admin-web-tests",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test" },
+  "engines": { "node": ">=22.13.0" },
+  "devDependencies": { "jsdom": "31.0.1" }
+}

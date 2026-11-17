@@ -1,0 +1,25 @@
+name: xiaojia-album
+services:
+  album:
+    build: ./server
+    restart: unless-stopped
+    ports:
+      - "${ALBUM_BIND_ADDRESS:-127.0.0.1}:${ALBUM_PORT:-8765}:8765"
+    environment:
+      ALBUM_DATA: /data
+      ALBUM_LIBRARY: /library
+      ALBUM_BOOTSTRAP_TOKEN: '${ALBUM_BOOTSTRAP_TOKEN:-}'
+      ALBUM_STORAGE_ROOTS: '${ALBUM_STORAGE_ROOTS:-[]}'
+      ALBUM_IMPORT_ROOTS: '${ALBUM_IMPORT_ROOTS:-[]}'
+      ALBUM_STORAGE_ALLOWED_ENDPOINTS: '${ALBUM_STORAGE_ALLOWED_ENDPOINTS:-}'
+      ALBUM_MAX_UPLOAD_BYTES: '${ALBUM_MAX_UPLOAD_BYTES:-2147483648}'
+      FORWARDED_ALLOW_IPS: '${ALBUM_TRUSTED_PROXIES:-127.0.0.1}'
+    volumes:
+      - album-data:/data
+      - ./library:/library:ro
+    logging:
+      options:
+        max-size: 10m
+        max-file: '3'
+volumes:
+  album-data:

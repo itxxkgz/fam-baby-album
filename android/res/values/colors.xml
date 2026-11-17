@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="album_background">#FFFBF7</color>
+    <color name="album_surface">#FFFFFF</color>
+    <color name="album_soft">#FBE7DA</color>
+    <color name="album_ink">#48342D</color>
+    <color name="album_muted">#847165</color>
+    <color name="album_soft_ink">#796457</color>
+    <color name="album_line">#EBD8CD</color>
+    <color name="album_accent">#B85A3E</color>
+    <color name="album_accent_dark">#943E28</color>
+    <color name="album_dark">#302522</color>
+</resources>

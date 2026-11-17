@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme.Base" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorAccent">@color/album_accent</item>
+        <item name="android:colorPrimary">@color/album_accent</item>
+        <item name="android:colorPrimaryDark">@color/album_accent_dark</item>
+        <item name="android:textColorPrimary">@color/album_ink</item>
+        <item name="android:textColorSecondary">@color/album_muted</item>
+        <item name="android:textColorHint">@color/album_muted</item>
+        <item name="android:colorControlNormal">@color/album_muted</item>
+        <item name="android:colorControlActivated">@color/album_accent</item>
+        <item name="android:colorControlHighlight">#26B85A3E</item>
+        <item name="android:colorButtonNormal">@color/album_soft</item>
+        <item name="android:colorBackground">@color/album_background</item>
+        <item name="android:colorBackgroundFloating">@color/album_background</item>
+        <item name="android:alertDialogTheme">@style/AlbumDialogTheme</item>
+        <item name="android:datePickerDialogTheme">@style/AlbumPickerTheme</item>
+        <item name="android:timePickerDialogTheme">@style/AlbumPickerTheme</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">@color/album_background</item>
+        <item name="android:navigationBarColor">@color/album_background</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">@color/album_background</item>
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+    </style>
+    <style name="AppTheme" parent="AppTheme.Base" />
+    <style name="AlbumDialogTheme" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorAccent">@color/album_accent</item>
+        <item name="android:textColorPrimary">@color/album_ink</item>
+        <item name="android:textColorSecondary">@color/album_muted</item>
+        <item name="android:textColorHint">@color/album_muted</item>
+        <item name="android:colorControlNormal">@color/album_muted</item>
+        <item name="android:colorControlActivated">@color/album_accent</item>
+        <item name="android:colorControlHighlight">#26B85A3E</item>
+        <item name="android:colorBackground">@color/album_background</item>
+        <item name="android:colorBackgroundFloating">@color/album_background</item>
+        <item name="android:windowBackground">@drawable/dialog_background</item>
+        <item name="android:buttonBarPositiveButtonStyle">@style/AlbumDialogButton</item>
+        <item name="android:buttonBarNegativeButtonStyle">@style/AlbumDialogButton</item>
+        <item name="android:buttonBarNeutralButtonStyle">@style/AlbumDialogButton</item>
+    </style>
+    <style name="AlbumDialogButton" parent="android:style/Widget.Material.Button.Borderless.Colored">
+        <item name="android:textColor">@color/album_accent_dark</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:minHeight">48dp</item>
+    </style>
+    <style name="AlbumPickerTheme" parent="AlbumDialogTheme">
+        <item name="android:windowMinWidthMajor">0dp</item>
+        <item name="android:windowMinWidthMinor">0dp</item>
+        <item name="android:datePickerStyle">@style/AlbumDatePicker</item>
+        <item name="android:timePickerStyle">@style/AlbumTimePicker</item>
+    </style>
+    <style name="AlbumDatePicker" parent="android:style/Widget.Material.DatePicker">
+        <item name="android:headerBackground">@color/album_background</item>
+        <item name="android:calendarTextColor">@color/album_ink</item>
+        <item name="android:yearListSelectorColor">@color/album_soft</item>
+    </style>
+    <style name="AlbumTimePicker" parent="android:style/Widget.Material.TimePicker">
+        <item name="android:headerBackground">@color/album_background</item>
+        <item name="android:numbersBackgroundColor">@color/album_soft</item>
+        <item name="android:numbersSelectorColor">@color/album_accent</item>
+        <item name="android:numbersTextColor">@color/clock_numbers</item>
+        <item name="android:numbersInnerTextColor">@color/clock_inner_numbers</item>
+    </style>
+</resources>
