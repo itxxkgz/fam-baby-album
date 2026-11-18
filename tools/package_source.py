@@ -11,6 +11,13 @@ ROOT_FILES = ('README.md', 'LICENSE', 'CONTRIBUTING.md', 'SECURITY.md', 'THIRD_P
 TOOLS = ('start_local.py', 'test_start_local.py', 'check.py', 'package_source.py')
 APP_ASSETS = ('android/res/drawable-nodpi/fam_launcher_art.png',
               'android/assets/legal/LICENSE.txt', 'android/assets/legal/THIRD_PARTY_NOTICES.txt')
+# Only reviewed public examples belong here; private reference boards stay excluded.
+PUBLIC_DESIGN_ASSETS = (
+    '01-album-and-memories.png', '02-family-and-activity.png', '03-growing-up.png',
+    '04-monthly-storybook.png', '05-babies-and-family.png', '06-photo-storage.png',
+    '07-nas-and-cloud.png', '08-admin-overview.png', '09-admin-import-and-family.png',
+    '10-admin-storage-and-settings.png',
+)
 SERVER = ('app.py', 'identity.py', 'storage.py', 'storage_api.py', 'media_inspection.py', 'memories.py', 'activity_feed.py',
           'admin_api.py', 'admin_imports.py', 'admin_backups.py', 'children.py',
           'import_album.py', 'requirements.txt', 'requirements-dev.txt', 'Dockerfile', '.dockerignore', 'API.md')
@@ -21,6 +28,7 @@ def source_files():
     paths = [ROOT / p for p in ROOT_FILES]
     paths += [ROOT / 'tools' / p for p in TOOLS]
     paths += [ROOT / p for p in APP_ASSETS]
+    paths += [ROOT / 'docs' / 'design' / 'public' / p for p in PUBLIC_DESIGN_ASSETS]
     paths += [ROOT / 'server' / p for p in SERVER if (ROOT / 'server' / p).is_file()]
     paths += list((ROOT / 'server' / 'tests').glob('test_*.py'))
     paths += [p for p in (ROOT / 'server' / 'web').rglob('*')

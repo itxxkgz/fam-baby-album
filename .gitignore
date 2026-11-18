@@ -13,7 +13,8 @@ dist/
 release-source/
 release-check/
 /设计/
-/docs/design/
+/docs/design/*
+!/docs/design/public/
 .env
 .env.*
 !.env.example

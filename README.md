@@ -8,12 +8,35 @@
 
 没有会员开关，不需要向项目作者注册账号。每个家庭部署自己的相册服务，自己管理照片、账号与存储。
 
-[下载安卓版](https://github.com/itxxkgz/fam-baby-album/releases/latest) · [部署说明](docs/部署与存储.md) · [网页后台](docs/网页管理后台.md) · [版本说明](docs/版本说明.md) · [反馈问题](https://github.com/itxxkgz/fam-baby-album/issues)
+[界面预览](docs/界面预览.md) · [下载安卓版](https://github.com/itxxkgz/fam-baby-album/releases/latest) · [部署说明](docs/部署与存储.md) · [网页后台](docs/网页管理后台.md) · [版本说明](docs/版本说明.md) · [反馈问题](https://github.com/itxxkgz/fam-baby-album/issues)
 
 | 组件 | 当前版本 | 用途 |
 | --- | --- | --- |
 | 安卓 App | 2.10.0，Android 8 及以上 | 家人浏览、上传与记录成长 |
 | 服务端与网页后台 | 2.9.2 | 保存资料、控制权限、管理和备份相册 |
+
+## 界面预览
+
+奶油白、杏桃色和陶土橙，让照片与成长故事成为页面的主角。下面是整理后的**设计示意图**，人物和相册资料为虚构示例；实际页面会随版本与家人权限有所不同。
+
+**相册与成长时光**：按年龄回看照片，从“从小到大”和“每月故事册”进入各自的回忆。
+
+![相册与成长时光设计图](docs/design/public/01-album-and-memories.png)
+
+**我的与家人动态**：家人、宝宝相册和常用操作放在一起，上传合并展示，回应直接对应照片。
+
+![我的与家人动态设计图](docs/design/public/02-family-and-activity.png)
+
+<details>
+<summary><strong>展开查看网页后台设计</strong></summary>
+
+后台延续相同暖色风格，在电脑上整理照片、导入文件和管理相册。下图为概览与照片管理的设计稿。
+
+![网页后台概览与照片管理设计图](docs/design/public/08-admin-overview.png)
+
+</details>
+
+**[查看完整设计图集 →](docs/界面预览.md)**：共 10 组，包含成长对比、每月故事册、宝宝与家人、照片存放、NAS 与云存储，以及后台六个入口。
 
 ## 可以做什么
 
@@ -108,6 +131,7 @@ python tools/check.py
 
 ## 使用说明
 
+- [完整设计图集](docs/界面预览.md)：主要页面、二级页面与网页后台的暖色设计。
 - [多宝宝相册](docs/多宝宝相册.md)：宝宝切换、合照共享与家人权限。
 - [浏览照片与视频](docs/浏览照片与视频.md)：筛选、时间定位、翻页和缩放。
 - [成长与故事册](docs/成长与故事册.md)：成长对比、月份封面与故事编辑。
