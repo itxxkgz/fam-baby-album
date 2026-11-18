@@ -44,6 +44,7 @@ final class TimeHomePage {
     private final int bodyWidth;
     private final boolean stacked;
     private ScrollView scroll;
+    private boolean growthLoaded, booksLoaded;
     private LinearLayout growthSlot, booksSlot;
     private int growthRequest, booksRequest;
     private boolean disposed;
@@ -176,13 +177,20 @@ final class TimeHomePage {
     }
 
     private void fetchGrowth() {
+        fetchGrowth(null);
+    }
+
+    private void fetchGrowth(java.util.function.Consumer<Boolean> done) {
         final int request = ++growthRequest;
         host.request(
                 "GET",
                 "/api/growth",
                 null,
                 result -> {
-                    if (disposed || request != growthRequest) return;
+                    if (disposed || request != growthRequest) {
+                        if (done != null) done.accept(false);
+                        return;
+                    }
                     ArrayList<JSONObject> years = new ArrayList<>();
                     JSONArray incoming = result.optJSONArray("years");
                     if (incoming != null)
@@ -199,12 +207,18 @@ final class TimeHomePage {
                     else if (years.size() == 1) message = "先记住这个年纪的模样";
                     else if (message.isEmpty()) message = "上传照片后，慢慢收集成长的模样";
                     showGrowth(years, message, false);
+                    growthLoaded = true;
                     ready();
+                    if (done != null) done.accept(true);
                 },
                 message -> {
-                    if (disposed || request != growthRequest) return;
-                    showGrowth(new ArrayList<>(), "成长照片暂时没有读到", true);
+                    if (disposed || request != growthRequest) {
+                        if (done != null) done.accept(false);
+                        return;
+                    }
+                    if (!growthLoaded) showGrowth(new ArrayList<>(), "成长照片暂时没有读到", true);
                     ready();
+                    if (done != null) done.accept(false);
                 });
     }
 
@@ -298,13 +312,20 @@ final class TimeHomePage {
     }
 
     private void fetchBooks() {
+        fetchBooks(null);
+    }
+
+    private void fetchBooks(java.util.function.Consumer<Boolean> done) {
         final int request = ++booksRequest;
         host.request(
                 "GET",
                 "/api/storybooks",
                 null,
                 result -> {
-                    if (disposed || request != booksRequest) return;
+                    if (disposed || request != booksRequest) {
+                        if (done != null) done.accept(false);
+                        return;
+                    }
                     JSONArray incoming = result.optJSONArray("months");
                     ArrayList<JSONObject> books = new ArrayList<>();
                     if (incoming != null)
@@ -318,12 +339,18 @@ final class TimeHomePage {
                             (first, second) ->
                                     second.optString("month").compareTo(first.optString("month")));
                     showBooks(books);
+                    booksLoaded = true;
                     ready();
+                    if (done != null) done.accept(true);
                 },
                 message -> {
-                    if (disposed || request != booksRequest) return;
-                    showBookMessage("故事册暂时没有读到，轻点重新读取", true);
+                    if (disposed || request != booksRequest) {
+                        if (done != null) done.accept(false);
+                        return;
+                    }
+                    if (!booksLoaded) showBookMessage("故事册暂时没有读到，轻点重新读取", true);
                     ready();
+                    if (done != null) done.accept(false);
                 });
     }
 
@@ -407,6 +434,12 @@ final class TimeHomePage {
                         fetchBooks();
                     });
         booksSlot.addView(state, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    void refresh(java.util.function.Consumer<Boolean> done) {
+        java.util.function.Consumer<Boolean> part = PullRefreshLayout.together(2, done);
+        fetchGrowth(part);
+        fetchBooks(part);
     }
 
     private void ready() {

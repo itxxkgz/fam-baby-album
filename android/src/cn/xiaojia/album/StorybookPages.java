@@ -247,6 +247,32 @@ final class StorybookPages {
                 });
     }
 
+    private void addDirectoryList(LinearLayout page, View list) {
+        PullRefreshLayout pull =
+                new PullRefreshLayout(
+                        activity,
+                        list,
+                        list,
+                        done -> {
+                            int request = serial;
+                            host.request(
+                                    "GET",
+                                    "/api/storybooks",
+                                    null,
+                                    result -> {
+                                        if (disposed || request != serial) return;
+                                        if (list == directoryList) rememberDirectory();
+                                        months = values(result, "months");
+                                        done.accept(true);
+                                        showDirectory();
+                                    },
+                                    message -> {
+                                        if (!disposed && request == serial) done.accept(false);
+                                    });
+                        });
+        page.addView(pull, new LinearLayout.LayoutParams(-1, 0, 1));
+    }
+
     private void showDirectory() {
         LinearLayout page = base();
         page.addView(
@@ -275,7 +301,7 @@ final class StorybookPages {
             TextView empty = text("上传照片和视频后，每个月的故事会出现在这里", 15, Ui.MUTED);
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(dp(32), 0, dp(32), 0);
-            page.addView(empty, new LinearLayout.LayoutParams(-1, 0, 1));
+            addDirectoryList(page, empty);
             present("directory", page, this::leave);
             return;
         }
@@ -373,7 +399,7 @@ final class StorybookPages {
                         return row;
                     }
                 });
-        page.addView(directoryList, new LinearLayout.LayoutParams(-1, 0, 1));
+        addDirectoryList(page, directoryList);
         HorizontalScrollView strip = new HorizontalScrollView(activity);
         strip.setHorizontalScrollBarEnabled(false);
         LinearLayout chips = Ui.row(activity);

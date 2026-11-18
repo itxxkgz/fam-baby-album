@@ -298,6 +298,10 @@ final class AlbumAgeNavigator extends FrameLayout {
         invalidate();
     }
 
+    void refreshUsedIndex() {
+        if (loaded || loading) listener.onRequestIndex();
+    }
+
     private void requestIfNeeded() {
         if (disposed || loading || (loaded && error.isEmpty())) return;
         loading = true;

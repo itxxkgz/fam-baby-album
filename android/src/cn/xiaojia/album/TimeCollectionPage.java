@@ -116,7 +116,6 @@ final class TimeCollectionPage {
         refresh.setGravity(Gravity.CENTER);
         refresh.setContentDescription("刷新" + title);
         refresh.setBackground(Ui.ripple(Ui.BG, 20, activity));
-        refresh.setOnClickListener(v -> refresh());
         bar.addView(refresh, new LinearLayout.LayoutParams(dp(48), dp(48)));
         page.addView(bar, new LinearLayout.LayoutParams(-1, dp(52)));
         list = new ListView(activity);
@@ -233,7 +232,11 @@ final class TimeCollectionPage {
         actionParams.topMargin = dp(24);
         emptyState.addView(emptyAction, actionParams);
         body.addView(emptyState, new FrameLayout.LayoutParams(-1, -1));
-        page.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
+        PullRefreshLayout pull =
+                new PullRefreshLayout(activity, body, list, done -> refresh(true, done));
+        pull.allowWhen(() -> !refreshing);
+        refresh.setOnClickListener(v -> pull.startRefresh());
+        page.addView(pull, new LinearLayout.LayoutParams(-1, 0, 1));
         updateLabels();
         if (!items.isEmpty()) list.setSelectionFromTop(firstPosition, firstOffset);
         if (dirty) refresh(false);
@@ -382,7 +385,15 @@ final class TimeCollectionPage {
     }
 
     private void refresh(boolean rememberVisiblePosition) {
-        if (invalidated || refreshing) return;
+        refresh(rememberVisiblePosition, null);
+    }
+
+    private void refresh(
+            boolean rememberVisiblePosition, java.util.function.Consumer<Boolean> done) {
+        if (invalidated || refreshing) {
+            if (done != null) done.accept(false);
+            return;
+        }
         if (rememberVisiblePosition) rememberPosition();
         refreshing = true;
         loading = false;
@@ -390,11 +401,19 @@ final class TimeCollectionPage {
         failureMessage = "";
         final int revision = ++requestRevision;
         updateLabels();
-        requestRefresh(new ArrayList<>(), "", Math.max(60, items.size()), revision);
+        int wanted =
+                done != null && list != null && !list.canScrollVertically(-1)
+                        ? 60
+                        : Math.max(60, items.size());
+        requestRefresh(new ArrayList<>(), "", wanted, revision, done);
     }
 
     private void requestRefresh(
-            ArrayList<JSONObject> fresh, String next, int wanted, int revision) {
+            ArrayList<JSONObject> fresh,
+            String next,
+            int wanted,
+            int revision,
+            java.util.function.Consumer<Boolean> done) {
         String path = "/api/media?limit=60&kind=" + kind + "&favorite=" + favorites;
         if (!month.isEmpty()) path += "&month=" + ApiClient.encode(month);
         if (!next.isEmpty()) path += "&cursor=" + ApiClient.encode(next);
@@ -409,7 +428,7 @@ final class TimeCollectionPage {
                     String following =
                             result.isNull("next_cursor") ? "" : result.optString("next_cursor");
                     if (!following.isEmpty() && fresh.size() < wanted) {
-                        requestRefresh(fresh, following, wanted, revision);
+                        requestRefresh(fresh, following, wanted, revision, done);
                         return;
                     }
                     items.clear();
@@ -426,12 +445,14 @@ final class TimeCollectionPage {
                     firstPosition = bookmark.row(itemIds(items), COLUMNS);
                     firstOffset = bookmark.offset();
                     if (list != null) list.setSelectionFromTop(firstPosition, firstOffset);
+                    if (done != null) done.accept(true);
                 },
                 message -> {
                     if (invalidated || revision != requestRevision) return;
                     refreshing = false;
                     failed = true;
                     refreshFailed = true;
+                    if (done != null) done.accept(false);
                     failureMessage = message;
                     updateLabels();
                 });

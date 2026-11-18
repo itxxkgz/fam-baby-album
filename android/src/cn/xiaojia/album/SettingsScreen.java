@@ -127,6 +127,15 @@ abstract class SettingsScreen {
         return panel;
     }
 
+    void enableListRefresh(LinearLayout panel, PullRefreshLayout.Action action) {
+        ScrollView scroll = (ScrollView) panel.getParent();
+        LinearLayout root = (LinearLayout) scroll.getParent();
+        int index = root.indexOfChild(scroll);
+        LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) scroll.getLayoutParams();
+        root.removeView(scroll);
+        root.addView(new PullRefreshLayout(activity, scroll, scroll, action), index, params);
+    }
+
     EditText field(LinearLayout panel, String label, String hint, String value, boolean secret) {
         TextView name = text(label, 14, Ui.INK);
         name.setPadding(0, dp(12), 0, dp(8));

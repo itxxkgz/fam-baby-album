@@ -63,6 +63,8 @@ final class FamilySettings extends SettingsScreen {
         show();
     }
 
+    private int familyListRequest;
+
     void show() {
         boolean manage = managesChildren();
         LinearLayout panel = page("family_settings", "相册家人", returnToOrigin);
@@ -76,35 +78,51 @@ final class FamilySettings extends SettingsScreen {
         TextView loading = note(panel, "正在读取家人资料…");
         LinearLayout list = group(panel);
         if (manage) footerButton("添加家人", this::showInvite);
-        host.runSettingTask(
-                () ->
-                        source.request(
-                                "GET",
-                                manage
-                                        ? "/api/children/"
-                                                + ApiClient.encode(source.childId)
-                                                + "/members"
-                                        : "/api/members",
-                                null),
-                result -> {
-                    if (revision != pageRevision || !current(panel, source)) return;
-                    loading.setVisibility(View.GONE);
-                    JSONArray members = registered(result.optJSONArray("items"));
-                    if (members.length() == 0) {
-                        note(list, "还没有家人加入这个相册。");
-                        return;
-                    }
-                    for (int i = 0; i < members.length(); i++) {
-                        if (i > 0) divider(list);
-                        list.addView(memberRow(members.getJSONObject(i), manage));
-                    }
-                },
-                error -> {
-                    if (revision != pageRevision || !current(panel, source)) return;
-                    loading.setText(error);
-                    loading.setTextColor(Ui.ERROR);
-                    textAction(list, "重新读取", this::show);
-                });
+        PullRefreshLayout.Action reload =
+                done -> {
+                    int ticket = ++familyListRequest;
+                    host.runSettingTask(
+                            () ->
+                                    source.request(
+                                            "GET",
+                                            manage
+                                                    ? "/api/children/"
+                                                            + ApiClient.encode(source.childId)
+                                                            + "/members"
+                                                    : "/api/members",
+                                            null),
+                            result -> {
+                                if (ticket != familyListRequest
+                                        || revision != pageRevision
+                                        || !current(panel, source)) return;
+                                list.removeAllViews();
+                                loading.setVisibility(View.GONE);
+                                if (done != null) done.accept(true);
+                                JSONArray members = registered(result.optJSONArray("items"));
+                                if (members.length() == 0) {
+                                    note(list, "还没有家人加入这个相册。");
+                                    return;
+                                }
+                                for (int i = 0; i < members.length(); i++) {
+                                    if (i > 0) divider(list);
+                                    list.addView(memberRow(members.getJSONObject(i), manage));
+                                }
+                            },
+                            error -> {
+                                if (ticket != familyListRequest
+                                        || revision != pageRevision
+                                        || !current(panel, source)) return;
+                                if (done != null) {
+                                    done.accept(false);
+                                    return;
+                                }
+                                loading.setText(error);
+                                loading.setTextColor(Ui.ERROR);
+                                textAction(list, "重新读取", this::show);
+                            });
+                };
+        enableListRefresh(panel, reload);
+        reload.run(null);
     }
 
     private void showMore(View origin, ApiClient source) {

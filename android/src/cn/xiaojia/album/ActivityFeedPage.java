@@ -51,6 +51,7 @@ final class ActivityFeedPage {
     private String filter = "all";
     private LinearLayout root;
     private ListView list;
+    private PullRefreshLayout pull;
     private BaseAdapter adapter;
     private TextView status, footer, fresh;
     private boolean visible, disposed, mediaOpen, hasNewResponse;
@@ -185,7 +186,7 @@ final class ActivityFeedPage {
         TextView title = text("家人动态", 23, Ui.INK);
         title.setTypeface(null, Typeface.BOLD);
         heading.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView refresh = smallAction("刷新", () -> refresh(true));
+        TextView refresh = smallAction("刷新", () -> pull.startRefresh());
         refresh.setContentDescription("刷新家人动态");
         heading.addView(refresh, new LinearLayout.LayoutParams(dp(58), dp(48)));
         root.addView(heading, new LinearLayout.LayoutParams(-1, dp(56)));
@@ -212,7 +213,7 @@ final class ActivityFeedPage {
         fresh.setPadding(dp(18), dp(8), dp(18), dp(8));
         fresh.setBackgroundColor(Ui.SOFT);
         fresh.setMinimumHeight(dp(48));
-        fresh.setOnClickListener(v -> refresh(true));
+        fresh.setOnClickListener(v -> pull.startRefresh());
         fresh.setVisibility(hasNewResponse ? View.VISIBLE : View.GONE);
         root.addView(fresh);
         FrameLayout area = new FrameLayout(activity);
@@ -266,10 +267,11 @@ final class ActivityFeedPage {
         status.setPadding(dp(28), dp(28), dp(28), dp(28));
         status.setOnClickListener(
                 v -> {
-                    if (!state().loading) refresh(true);
+                    if (!state().loading) pull.startRefresh();
                 });
         area.addView(status, new FrameLayout.LayoutParams(-1, dp(200), Gravity.TOP));
-        root.addView(area, new LinearLayout.LayoutParams(-1, 0, 1));
+        pull = new PullRefreshLayout(activity, area, list, done -> load(state(), filter, done));
+        root.addView(pull, new LinearLayout.LayoutParams(-1, 0, 1));
         host.showFeed(root);
         updateStatus();
         restorePosition();
@@ -293,41 +295,25 @@ final class ActivityFeedPage {
         if (!state().loaded) load(state(), filter);
     }
 
-    private void refresh(boolean resetPosition) {
-        if (disposed) return;
-        if (!resetPosition && !state().items.isEmpty()) rememberPosition();
-        FeedState value = state();
-        value.request++;
-        value.loading = false;
-        value.loaded = false;
-        value.more = true;
-        value.cursor = value.error = "";
-        value.items.clear();
-        value.ids.clear();
-        if (resetPosition) {
-            value.first = value.offset = 0;
-            value.anchor = "";
-        }
-        hasNewResponse = false;
-        sentResponses.clear();
-        sentResponseIds.clear();
-        if (visible && adapter != null) {
-            adapter.notifyDataSetChanged();
-            updateStatus();
-        }
-        load(value, filter);
+    private void load(FeedState value, String kind) {
+        load(value, kind, null);
     }
 
-    private void load(FeedState value, String kind) {
-        if (disposed || value.loading || !value.more) return;
+    private void load(FeedState value, String kind, java.util.function.Consumer<Boolean> done) {
+        boolean replace = done != null;
+        if (disposed || (!replace && (value.loading || !value.more))) {
+            if (replace) done.accept(false);
+            return;
+        }
+        if (replace) value.request++;
         value.loading = true;
         value.error = "";
         final int request = value.request;
         final int permissions = ++permissionRequest;
-        final String previousCursor = value.cursor;
+        final String previousCursor = replace ? "" : value.cursor;
         if (visible && state() == value) updateStatus();
         String path = "/api/activity-feed?kind=" + kind + "&limit=20";
-        if (!value.cursor.isEmpty()) path += "&cursor=" + ApiClient.encode(value.cursor);
+        if (!previousCursor.isEmpty()) path += "&cursor=" + ApiClient.encode(previousCursor);
         host.requestDetailed(
                 "GET",
                 path,
@@ -337,6 +323,17 @@ final class ActivityFeedPage {
                     if (permissions == permissionRequest && result.has("can_respond")) {
                         responsePermission = result.optBoolean("can_respond");
                         updateComposer();
+                    }
+                    if (replace) {
+                        value.items.clear();
+                        value.ids.clear();
+                        value.first = value.offset = 0;
+                        value.anchor = "";
+                        if (state() == value) {
+                            hasNewResponse = false;
+                            sentResponses.clear();
+                            sentResponseIds.clear();
+                        }
                     }
                     value.loading = false;
                     value.loaded = true;
@@ -360,11 +357,13 @@ final class ActivityFeedPage {
                         updateStatus();
                         if (previousCursor.isEmpty()) restorePosition();
                     }
+                    if (replace) done.accept(true);
                 },
                 (code, message) -> {
                     if (disposed || request != value.request) return;
                     value.loading = false;
                     value.error = message;
+                    if (replace) done.accept(false);
                     if (visible && state() == value) updateStatus();
                 });
     }

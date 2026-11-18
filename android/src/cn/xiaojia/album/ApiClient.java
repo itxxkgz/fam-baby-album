@@ -119,7 +119,10 @@ final class ApiClient {
 
     void selectChild(String value) {
         childId = value == null ? "" : value;
-        context.getSharedPreferences("album", 0).edit().putString("selected_child", childId).apply();
+        context.getSharedPreferences("album", 0)
+                .edit()
+                .putString("selected_child", childId)
+                .apply();
     }
 
     String cacheScope() { return BabyScope.cacheScope(baseUrl, token, childId); }
@@ -239,23 +242,33 @@ final class ApiClient {
         }
     }
 
-    JSONObject upload(Uri source, String name, String mime, String fallbackCapturedAt)
+    JSONObject upload(
+            Uri source,
+            String name,
+            String mime,
+            String fallbackCapturedAt,
+            JSONArray children,
+            DownloadCancellation cancellation,
+            UploadTransfer.Listener progress)
             throws Exception {
-        return upload(source, name, mime, fallbackCapturedAt, null);
-    }
-
-    JSONObject upload(Uri source, String name, String mime, String fallbackCapturedAt, JSONArray children)
-            throws Exception {
+        cancellation.check();
         String boundary = "AlbumUpload" + UUID.randomUUID().toString().replace("-", "");
         HttpURLConnection connection = connection("/api/upload", "POST");
         connection.setDoOutput(true);
         connection.setChunkedStreamingMode(64 * 1024);
         connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
         try {
+            cancellation.attach(connection);
             try (OutputStream raw = new BufferedOutputStream(connection.getOutputStream())) {
-                if (children != null) write(raw, "--" + boundary
-                        + "\r\nContent-Disposition: form-data; name=\"child_ids\"\r\n\r\n"
-                        + children.toString() + "\r\n");
+                if (children != null)
+                    write(
+                            raw,
+                            "--"
+                                    + boundary
+                                    + "\r\n"
+                                    + "Content-Disposition: form-data; name=\"child_ids\"\r\n\r\n"
+                                    + children.toString()
+                                    + "\r\n");
                 if (fallbackCapturedAt != null && !fallbackCapturedAt.isEmpty()) {
                     write(
                             raw,
@@ -279,12 +292,11 @@ final class ApiClient {
                                 + "\r\n\r\n");
                 try (InputStream stream = context.getContentResolver().openInputStream(source)) {
                     if (stream == null) throw new IOException("无法读取选中的文件");
-                    byte[] buffer = new byte[64 * 1024];
-                    int count;
-                    while ((count = stream.read(buffer)) != -1) raw.write(buffer, 0, count);
+                    UploadTransfer.copy(stream, raw, progress);
                 }
                 write(raw, "\r\n--" + boundary + "--\r\n");
             }
+            progress.saving();
             int code = connection.getResponseCode();
             String response =
                     readText(
@@ -294,6 +306,7 @@ final class ApiClient {
             if (code < 200 || code >= 300) throw new HttpError(code, message(code, response));
             return new JSONObject(response);
         } finally {
+            cancellation.detach(connection);
             connection.disconnect();
         }
     }

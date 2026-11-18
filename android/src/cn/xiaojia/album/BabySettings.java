@@ -100,6 +100,8 @@ final class BabySettings extends SettingsScreen {
         showList(false);
     }
 
+    private int babyListRequest;
+
     private void showList(boolean archivedOnly) {
         LinearLayout panel =
                 page(
@@ -109,7 +111,6 @@ final class BabySettings extends SettingsScreen {
         final int requested = revision;
         ApiClient source = host.client().snapshot();
         ImageLoader roster = rosterLoader(source);
-        closeWithPage(panel, roster);
         TextView status = state(panel);
         status.setTextColor(Ui.MUTED);
         status.setText("正在读取宝宝资料…");
@@ -120,55 +121,80 @@ final class BabySettings extends SettingsScreen {
                 textAction((LinearLayout) add.getParent(), "用邀请码加入", this::join);
             } else footerButton("用邀请码加入", this::join);
         }
-        host.runSettingTask(
-                () ->
-                        source.request(
-                                "GET",
-                                "/api/children" + (familyAdmin() ? "?include_archived=true" : ""),
-                                null),
-                result -> {
-                    if (!current(panel, requested, source)) return;
-                    status.setText("");
-                    JSONArray children = result.optJSONArray("items");
-                    int shown = 0, archived = 0;
-                    if (children != null)
-                        for (int i = 0; i < children.length(); i++) {
-                            JSONObject child = children.getJSONObject(i);
-                            if (child.optBoolean("archived")) archived++;
-                            if (child.optBoolean("archived") != archivedOnly) continue;
-                            if (shown++ > 0) divider(list);
-                            list.addView(
-                                    childRow(
-                                            child,
-                                            child.optString("id").equals(source.childId),
-                                            archivedOnly
-                                                    ? () -> archive(child, panel, requested, source)
-                                                    : () ->
-                                                            babyHost.selectBaby(
-                                                                    child.optString("id")),
-                                            roster,
-                                            true));
-                        }
-                    if (shown == 0) {
-                        note(list, archivedOnly ? "没有收起的宝宝相册" : "还没有宝宝相册");
-                        if (!archivedOnly)
-                            note(list, familyAdmin() ? "添加宝宝，开始记录成长。" : "使用家人发来的邀请码加入。");
-                    }
-                    if (!archivedOnly && familyAdmin() && archived > 0)
-                        list.addView(
-                                valueRow(
-                                        "storage",
-                                        "已收起的相册",
-                                        String.valueOf(archived),
-                                        () -> showList(true)));
-                    if (archivedOnly && shown > 0) note(panel, "照片和家人权限仍然保留，点开即可恢复。");
-                },
-                error -> {
-                    if (!current(panel, requested, source)) return;
-                    status.setTextColor(Ui.ERROR);
-                    status.setText(error);
-                    textAction(panel, "重新读取", () -> showList(archivedOnly));
-                });
+        PullRefreshLayout.Action reload =
+                done -> {
+                    int ticket = ++babyListRequest;
+                    host.runSettingTask(
+                            () ->
+                                    source.request(
+                                            "GET",
+                                            "/api/children"
+                                                    + (familyAdmin()
+                                                            ? "?include_archived=true"
+                                                            : ""),
+                                            null),
+                            result -> {
+                                if (ticket != babyListRequest || !current(panel, requested, source))
+                                    return;
+                                list.removeAllViews();
+                                status.setText("");
+                                if (done != null) done.accept(true);
+                                JSONArray children = result.optJSONArray("items");
+                                int shown = 0, archived = 0;
+                                if (children != null)
+                                    for (int i = 0; i < children.length(); i++) {
+                                        JSONObject child = children.getJSONObject(i);
+                                        if (child.optBoolean("archived")) archived++;
+                                        if (child.optBoolean("archived") != archivedOnly) continue;
+                                        if (shown++ > 0) divider(list);
+                                        list.addView(
+                                                childRow(
+                                                        child,
+                                                        child.optString("id")
+                                                                .equals(source.childId),
+                                                        archivedOnly
+                                                                ? () ->
+                                                                        archive(
+                                                                                child, panel,
+                                                                                requested, source)
+                                                                : () ->
+                                                                        babyHost.selectBaby(
+                                                                                child.optString(
+                                                                                        "id")),
+                                                        roster,
+                                                        true));
+                                    }
+                                if (shown == 0) {
+                                    note(list, archivedOnly ? "没有收起的宝宝相册" : "还没有宝宝相册");
+                                    if (!archivedOnly)
+                                        note(
+                                                list,
+                                                familyAdmin() ? "添加宝宝，开始记录成长。" : "使用家人发来的邀请码加入。");
+                                }
+                                if (!archivedOnly && familyAdmin() && archived > 0)
+                                    list.addView(
+                                            valueRow(
+                                                    "storage",
+                                                    "已收起的相册",
+                                                    String.valueOf(archived),
+                                                    () -> showList(true)));
+                                if (archivedOnly && shown > 0) note(list, "照片和家人权限仍然保留，点开即可恢复。");
+                            },
+                            error -> {
+                                if (ticket != babyListRequest || !current(panel, requested, source))
+                                    return;
+                                if (done != null) {
+                                    done.accept(false);
+                                    return;
+                                }
+                                status.setTextColor(Ui.ERROR);
+                                status.setText(error);
+                                textAction(list, "重新读取", () -> showList(archivedOnly));
+                            });
+                };
+        enableListRefresh(panel, reload);
+        closeWithPage(panel, roster);
+        reload.run(null);
     }
 
     private ImageLoader rosterLoader(ApiClient source) {

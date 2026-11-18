@@ -1,8 +1,8 @@
 param(
     [switch]$Install,
     [string]$Device = 'emulator-5554',
-    [int]$VersionCode = 22,
-    [string]$VersionName = '2.10.0',
+    [int]$VersionCode = 24,
+    [string]$VersionName = '2.12.0',
     [string]$AndroidSdkPath = '',
     [string]$JavaHome = '',
     [string]$BuildToolsVersion = '',
@@ -140,7 +140,9 @@ try {
     $memberAccessTests = Join-Path $sourceDirectory 'test/cn/xiaojia/album/MemberAccessStateTest.java'
     $storageSaveTests = Join-Path $sourceDirectory 'test/cn/xiaojia/album/StorageSaveStateTest.java'
     $childAccessTests = Join-Path $sourceDirectory 'test/cn/xiaojia/album/ChildAccessStateTest.java'
-    foreach ($testSource in @($invitationTests, $gestureTests, $positionTests, $storybookTests, $babyScopeTests, $ageNavigationTests, $handlePositionTests, $timelineProgressTests, $dragNavigationTests, $memberAccessTests, $storageSaveTests, $childAccessTests)) {
+    $pullTests = Join-Path $sourceDirectory 'test/cn/xiaojia/album/PullRefreshGestureTest.java'
+    $uploadTests = Join-Path $sourceDirectory 'test/cn/xiaojia/album/UploadTransferTest.java'
+    foreach ($testSource in @($pullTests, $uploadTests, $invitationTests, $gestureTests, $positionTests, $storybookTests, $babyScopeTests, $ageNavigationTests, $handlePositionTests, $timelineProgressTests, $dragNavigationTests, $memberAccessTests, $storageSaveTests, $childAccessTests)) {
         if (-not (Test-Path -LiteralPath $testSource -PathType Leaf)) {
             throw '安卓自动检查文件不完整，请恢复完整源码后重新构建。'
         }
@@ -161,7 +163,9 @@ try {
         (Join-Path $sourceDirectory 'src/cn/xiaojia/album/MemberAccessState.java'),
         (Join-Path $sourceDirectory 'src/cn/xiaojia/album/StorageSaveState.java'),
         (Join-Path $sourceDirectory 'src/cn/xiaojia/album/ChildAccessState.java'),
-        $invitationTests, $gestureTests, $positionTests, $storybookTests, $babyScopeTests, $ageNavigationTests, $handlePositionTests, $timelineProgressTests, $dragNavigationTests, $memberAccessTests, $storageSaveTests, $childAccessTests) '安卓自动检查未能编译。'
+        (Join-Path $sourceDirectory 'src/cn/xiaojia/album/PullRefreshGesture.java'),
+        (Join-Path $sourceDirectory 'src/cn/xiaojia/album/UploadTransfer.java'),
+        $pullTests, $uploadTests, $invitationTests, $gestureTests, $positionTests, $storybookTests, $babyScopeTests, $ageNavigationTests, $handlePositionTests, $timelineProgressTests, $dragNavigationTests, $memberAccessTests, $storageSaveTests, $childAccessTests) '安卓自动检查未能编译。'
     $testClasspath = $testClasses + [IO.Path]::PathSeparator + $androidJar
     Invoke-BuildCommand $java @('-cp', $testClasspath, 'cn.xiaojia.album.InvitationTextTest') '邀请内容检查未通过。'
     Invoke-BuildCommand $java @('-cp', $testClasspath, 'cn.xiaojia.album.MediaPagerDecisionTest') '翻页手势检查未通过。'
@@ -175,6 +179,10 @@ try {
     Invoke-BuildCommand $java @('-cp', $testClasspath, 'cn.xiaojia.album.MemberAccessStateTest') '家人权限开关检查未通过。'
     Invoke-BuildCommand $java @('-cp', $testClasspath, 'cn.xiaojia.album.StorageSaveStateTest') '存储保存与重试检查未通过。'
     Invoke-BuildCommand $java @('-cp', $testClasspath, 'cn.xiaojia.album.ChildAccessStateTest') '宝宝访问范围检查未通过。'
+
+    Invoke-BuildCommand $java @('-cp', $testClasspath, 'cn.xiaojia.album.UploadTransferTest') '上传进度检查未通过。'
+
+    Invoke-BuildCommand $java @('-cp', $testClasspath, 'cn.xiaojia.album.PullRefreshGestureTest') '顶部下拉手势检查未通过。'
 
     Write-Host '正在编译安卓应用。'
     $javaFiles = @(Get-ChildItem -LiteralPath (Join-Path $sourceDirectory 'src') -Recurse -Filter '*.java' -File)

@@ -24,10 +24,15 @@ final class MePage {
     private final Activity activity;
     private final Consumer<String> action;
     private ScrollView scroll;
-    private TextView storageSize;
+    private TextView storageSize, memberLabel, familyLabel, roleLabel;
+    private final PullRefreshLayout.Action refreshProfile;
     private int position, revision;
 
-    MePage(SettingsScreen.Host host, Consumer<String> action) {
+    MePage(
+            SettingsScreen.Host host,
+            Consumer<String> action,
+            PullRefreshLayout.Action refreshProfile) {
+        this.refreshProfile = refreshProfile;
         this.host = host;
         this.activity = host.activity();
         this.action = action;
@@ -58,6 +63,10 @@ final class MePage {
     }
 
     void refreshFamily() {
+        if (memberLabel != null) memberLabel.setText(host.identity().optString("name", "家人"));
+        if (roleLabel != null) roleLabel.setText(host.identity().optString("role_label", "家人"));
+        if (familyLabel != null)
+            familyLabel.setText(host.family().optString("child_name", "宝宝") + "的家庭相册");
         if (storageSize != null)
             storageSize.setText("相册共占用 " + Ui.size(host.family().optLong("storage_bytes")));
     }
@@ -92,16 +101,19 @@ final class MePage {
         LinearLayout identity = Ui.column(activity);
         identity.setPadding(dp(12), 0, dp(2), 0);
         TextView heading = text(name, 21, Ui.INK);
+        memberLabel = heading;
         heading.setTypeface(null, Typeface.BOLD);
         heading.setMaxLines(2);
         heading.setEllipsize(TextUtils.TruncateAt.END);
         identity.addView(heading);
         TextView family = text(host.family().optString("child_name", "宝宝") + "的家庭相册", 12, Ui.MUTED);
+        familyLabel = family;
         family.setMaxLines(2);
         family.setEllipsize(TextUtils.TruncateAt.END);
         family.setPadding(0, dp(4), 0, dp(5));
         identity.addView(family);
         TextView role = text(host.identity().optString("role_label", "家人"), 10, Ui.ACCENT_DARK);
+        roleLabel = role;
         role.setPadding(dp(7), dp(3), dp(7), dp(3));
         role.setBackground(Ui.round(Ui.SOFT, 9, activity));
         identity.addView(role, new LinearLayout.LayoutParams(-2, -2));
@@ -200,6 +212,31 @@ final class MePage {
         separator(panel);
         panel.addView(menu("brand", "关于FAM宝贝相册", "about"));
 
+        loadCards(request, faces, familyCount, screenWidth, storageName, null);
+        ScrollView current = scroll;
+        current.post(
+                () -> {
+                    if (scroll == current) current.scrollTo(0, position);
+                });
+        return new PullRefreshLayout(
+                activity,
+                current,
+                current,
+                done -> {
+                    Consumer<Boolean> part =
+                            PullRefreshLayout.together(allowed("can_manage_storage") ? 3 : 2, done);
+                    refreshProfile.run(part);
+                    loadCards(++revision, faces, familyCount, screenWidth, storageName, part);
+                });
+    }
+
+    private void loadCards(
+            int request,
+            LinearLayout faces,
+            TextView familyCount,
+            int screenWidth,
+            TextView storageName,
+            Consumer<Boolean> part) {
         final ApiClient source = host.client().snapshot();
         final ScrollView familyPage = scroll;
         final boolean manageFamily = allowed("can_manage_members") || allowed("can_invite_child");
@@ -218,9 +255,14 @@ final class MePage {
                     JSONArray members = registered(result.optJSONArray("items"));
                     bindFaces(faces, members, screenWidth);
                     familyCount.setText(members.length() + "位家人  ›");
+                    if (part != null) part.accept(true);
                 },
                 message -> {
                     if (!currentFamily(request, familyPage, source)) return;
+                    if (part != null) {
+                        part.accept(false);
+                        return;
+                    }
                     faces.removeAllViews();
                     TextView retry = text("家人暂未载入，点此查看", 12, Ui.MUTED);
                     retry.setMinHeight(dp(62));
@@ -229,7 +271,7 @@ final class MePage {
                 });
         if (allowed("can_manage_storage"))
             host.runSettingTask(
-                    () -> host.client().request("GET", "/api/storage", null),
+                    () -> source.request("GET", "/api/storage", null),
                     result -> {
                         if (request != revision) return;
                         JSONArray items = result.optJSONArray("items");
@@ -245,16 +287,13 @@ final class MePage {
                                 break;
                             }
                         storageName.setText(label);
+                        if (part != null) part.accept(true);
                     },
                     message -> {
-                        if (request == revision) storageName.setText("点此查看存放位置");
+                        if (request != revision) return;
+                        if (part != null) part.accept(false);
+                        else storageName.setText("点此查看存放位置");
                     });
-        ScrollView current = scroll;
-        current.post(
-                () -> {
-                    if (scroll == current) current.scrollTo(0, position);
-                });
-        return scroll;
     }
 
     private boolean currentFamily(int request, ScrollView page, ApiClient source) {

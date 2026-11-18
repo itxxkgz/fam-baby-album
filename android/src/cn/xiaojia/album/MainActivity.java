@@ -2,15 +2,12 @@ package cn.xiaojia.album;
 
 import android.app.*;
 import android.content.*;
-import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.media.ExifInterface;
-import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.*;
 import android.provider.MediaStore;
-import android.provider.OpenableColumns;
 import android.text.InputType;
 import android.view.*;
 import android.widget.*;
@@ -58,7 +55,12 @@ public final class MainActivity extends Activity
     private final ArrayList<WarmSheet> secondarySheets = new ArrayList<>();
     private final ThreadLocal<ApiClient> settingClient = new ThreadLocal<>();
     private int uploadPickerEpoch;
-    private WarmSheet uploadProgress;
+    private LinearLayout uploadStrip;
+    private ProgressBar uploadBar;
+    private TextView uploadLabel;
+    private UploadService.Batch seenResult;
+    private boolean albumUploadsChanged;
+    private final Runnable uploadObserver = this::renderUpload;
     private String currentPage = "album",
             selectedTab = "album",
             filter = "all",
@@ -81,7 +83,7 @@ public final class MainActivity extends Activity
     private boolean albumToolsVisible;
     private AlbumAdapter albumAdapter;
     private AlbumAgeNavigator albumAgeNavigator;
-    private View albumProfileHeader;
+    private FrameLayout albumProfileHeader;
     private boolean albumTrackMeasured, albumPositionAdjusting;
     private final AlbumDragNavigation albumDragNavigation = new AlbumDragNavigation();
     private Runnable albumDragCancel;
@@ -158,7 +160,6 @@ public final class MainActivity extends Activity
     private int videoSavedPosition = 0, videoSavedDuration = 0;
     private String storyReturnVideo = "";
     private int storyReturnPosition;
-    private boolean uploadRunning = false;
     private boolean smallPhotos = true;
     private JSONObject pendingSave;
     private static final int PICK_UPLOAD = 20, PICK_AVATAR = 21;
@@ -248,7 +249,7 @@ public final class MainActivity extends Activity
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 
-    private String errorText(Exception error) {
+    static String errorText(Exception error) {
         if (error instanceof java.net.SocketTimeoutException) return "网络响应较慢，请稍后重试";
         String message = error.getMessage();
         if (message != null
@@ -379,7 +380,9 @@ public final class MainActivity extends Activity
         root.setBackgroundColor(dark ? VIEWER_BACKGROUND : Ui.BG);
         content = new FrameLayout(this);
         root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
+        uploadStrip = null;
         if (tabs) {
+            addUploadStrip();
             View line = new View(this);
             line.setBackgroundColor(Ui.LINE);
             root.addView(line, new LinearLayout.LayoutParams(-1, dp(.5f)));
@@ -426,7 +429,7 @@ public final class MainActivity extends Activity
         refreshIdentity();
         if (key.equals("album") && !api.token.isEmpty()) refreshProfile();
         if (key.equals("album") && currentPage.equals("album") && albumList != null) {
-            if (albumHasNewer || locatingAlbum || loadingNewer) {
+            if (albumUploadsChanged || albumHasNewer || locatingAlbum || loadingNewer) {
                 showAlbum(true);
                 return;
             }
@@ -441,7 +444,7 @@ public final class MainActivity extends Activity
         currentPage = key;
         if (key.equals("album")) {
             trashMode = false;
-            showAlbum(false);
+            showAlbum(albumUploadsChanged);
         } else if (key.equals("time")) showTime();
         else if (key.equals("months")) showMonths();
         else if (key.equals("activity")) showActivity();
@@ -634,7 +637,10 @@ public final class MainActivity extends Activity
     private void showAlbum(boolean reload) {
         currentPage = trashMode ? "trash" : "album";
         if (!trashMode) selectedTab = "album";
-        if (reload) resetAlbum();
+        if (reload) {
+            if (!trashMode) albumUploadsChanged = false;
+            resetAlbum();
+        }
         screen(!trashMode);
         LinearLayout layout = Ui.column(this);
         content.addView(layout, new FrameLayout.LayoutParams(-1, -1));
@@ -661,7 +667,8 @@ public final class MainActivity extends Activity
         albumList.setVerticalScrollBarEnabled(false);
         albumList.setOverScrollMode(View.OVER_SCROLL_NEVER);
         if (!trashMode) {
-            albumProfileHeader = albumHeader();
+            albumProfileHeader = new FrameLayout(this);
+            albumProfileHeader.addView(albumHeader());
             albumList.addHeaderView(albumProfileHeader, null, false);
         }
         loadFooter = text("正在加载…", 13, Ui.MUTED);
@@ -672,7 +679,16 @@ public final class MainActivity extends Activity
         albumAdapter = new AlbumAdapter();
         rebuildRows();
         albumList.setAdapter(albumAdapter);
-        layout.addView(albumList, new LinearLayout.LayoutParams(-1, 0, 1));
+        PullRefreshLayout pull =
+                new PullRefreshLayout(this, albumList, albumList, done -> loadMedia(done));
+        pull.allowWhen(
+                () ->
+                        !loading
+                                && !loadingNewer
+                                && !locatingAlbum
+                                && !albumHasNewer
+                                && !albumDragNavigation.isDragging());
+        layout.addView(pull, new LinearLayout.LayoutParams(-1, 0, 1));
         if (!trashMode) {
             albumFloatingTools = albumTools();
             albumFloatingTools.setVisibility(View.INVISIBLE);
@@ -1273,20 +1289,27 @@ public final class MainActivity extends Activity
         }
     }
 
+    private int albumIndexRevision;
+
     private void loadAlbumAgeIndex() {
         final AlbumAgeNavigator navigator = albumAgeNavigator;
         if (navigator == null || trashMode) return;
         final String endpoint = "/api/album-locator?" + albumQuery();
+        int revision = ++albumIndexRevision;
         navigator.setLoading(true);
         async(
                 () -> client().request("GET", endpoint, null),
                 result -> {
-                    if (navigator != albumAgeNavigator || !currentPage.equals("album")) return;
+                    if (revision != albumIndexRevision
+                            || navigator != albumAgeNavigator
+                            || !currentPage.equals("album")) return;
                     navigator.setItems(array(result, "items"));
                     updateAlbumAge(albumList.getFirstVisiblePosition());
                 },
                 failure -> {
-                    if (navigator != albumAgeNavigator || !currentPage.equals("album")) return;
+                    if (revision != albumIndexRevision
+                            || navigator != albumAgeNavigator
+                            || !currentPage.equals("album")) return;
                     navigator.setError(
                             failure.optInt("status") == 404
                                     ? "请先更新相册服务，再使用年龄定位"
@@ -1663,23 +1686,57 @@ public final class MainActivity extends Activity
     }
 
     private void loadMedia() {
+        loadMedia(null);
+    }
+
+    private void loadMedia(java.util.function.Consumer<Boolean> done) {
+        boolean replace = done != null;
         if (albumDragNavigation.isDragging()
                 || loading
                 || loadingNewer
                 || locatingAlbum
-                || !hasMore) return;
+                || (!replace && !hasMore)) {
+            if (replace) done.accept(false);
+            return;
+        }
         loading = true;
+        boolean wasFailed = loadFailed;
+        CharSequence previousFooter = replace && loadFooter != null ? loadFooter.getText() : null;
         loadFailed = false;
         int requestGeneration = generation;
+        final boolean includeProfile = replace && !trashMode;
         if (loadFooter != null) loadFooter.setText("正在加载…");
         String path = "/api/media?limit=60&" + albumQuery() + "&deleted=" + trashMode;
-        if (!cursor.isEmpty()) path += "&cursor=" + ApiClient.encode(cursor);
+        if (!replace && !cursor.isEmpty()) path += "&cursor=" + ApiClient.encode(cursor);
         String endpoint = path;
         async(
-                () -> client().request("GET", endpoint, null),
+                () -> {
+                    ApiClient source = client();
+                    JSONObject value = source.request("GET", endpoint, null);
+                    if (includeProfile)
+                        value.put("profile", source.request("GET", "/api/profile", null));
+                    return value;
+                },
                 result -> {
-                    if (requestGeneration != generation) return;
-                    loading = false;
+                    if (requestGeneration != generation) {
+                        if (replace) done.accept(true);
+                        return;
+                    }
+                    if (replace) {
+                        media.clear();
+                        mediaIds.clear();
+                        savedListPosition = savedListOffset = 0;
+                        if (includeProfile) {
+                            profile = result.getJSONObject("profile");
+                            albumUploadsChanged = false;
+                            if (albumProfileHeader != null) {
+                                cancelPageImages(albumProfileHeader);
+                                albumProfileHeader.removeAllViews();
+                                albumProfileHeader.addView(albumHeader());
+                                albumTrackMeasured = false;
+                            }
+                        }
+                    }
                     if (media.isEmpty()) {
                         albumWindowHeadComplete = true;
                         previousAlbumCursor = str(result, "previous_cursor");
@@ -1697,11 +1754,27 @@ public final class MainActivity extends Activity
                         rebuildRows();
                         albumAdapter.notifyDataSetChanged();
                     }
+                    loading = false;
                     updateFooter();
+                    if (replace) {
+                        if (includeProfile && albumAgeNavigator != null)
+                            albumAgeNavigator.refreshUsedIndex();
+                        done.accept(true);
+                    }
                 },
                 failure -> {
-                    if (requestGeneration != generation) return;
+                    if (requestGeneration != generation) {
+                        if (replace) done.accept(true);
+                        return;
+                    }
                     loading = false;
+                    if (replace) {
+                        loadFailed = wasFailed;
+                        if (loadFooter != null && previousFooter != null)
+                            loadFooter.setText(previousFooter);
+                        done.accept(false);
+                        return;
+                    }
                     loadFailed = true;
                     if (loadFooter != null)
                         loadFooter.setText(failure.optString("message") + "，点这里重试");
@@ -3680,6 +3753,10 @@ public final class MainActivity extends Activity
     }
 
     private void refreshProfile() {
+        refreshProfile(null);
+    }
+
+    private void refreshProfile(java.util.function.Consumer<Boolean> done) {
         async(
                 () -> client().request("GET", "/api/profile", null),
                 result -> {
@@ -3711,8 +3788,9 @@ public final class MainActivity extends Activity
                     if (albumSummary != null) albumSummary.setText(albumCounts());
                     if (storageLabel != null)
                         storageLabel.setText("已保存 " + Ui.size(result.optLong("storage_bytes")));
+                    if (done != null) done.accept(true);
                 },
-                null);
+                done == null ? null : failure -> done.accept(false));
     }
 
     private void showComments(JSONObject item) {
@@ -3991,6 +4069,7 @@ public final class MainActivity extends Activity
         cancelPageImages(timeHomeView);
         cancelPageImages(timeMonthsView);
         timeHomeView = null;
+        timeHomePull = null;
         timeMonthsView = null;
         timeMonthCovers.clear();
         timeHomeRestoreY = -1;
@@ -4017,6 +4096,7 @@ public final class MainActivity extends Activity
         if (timeHomePage != null) timeHomePage.dispose();
         timeHomePage = null;
         timeHomeView = null;
+        timeHomePull = null;
         timeHomeDirty = false;
         timeMonthCovers.clear();
         showTime();
@@ -4370,6 +4450,8 @@ public final class MainActivity extends Activity
                 });
     }
 
+    private PullRefreshLayout timeHomePull;
+
     private void showTime() {
         rememberBrowsingPosition();
         if (timeHomeDirty && timeHomeView != null) {
@@ -4380,7 +4462,7 @@ public final class MainActivity extends Activity
         selectedTab = "time";
         screen(true);
         if (timeHomeView != null) {
-            attachTimeView(timeHomeView);
+            attachTimeView(timeHomePull);
             return;
         }
         timeHomePage =
@@ -4412,7 +4494,7 @@ public final class MainActivity extends Activity
                             }
 
                             public void refresh() {
-                                refreshTimeHome();
+                                timeHomePull.startRefresh();
                             }
 
                             public void contentReady() {
@@ -4427,7 +4509,9 @@ public final class MainActivity extends Activity
                         timeHomeRestoreY = -1;
                     return false;
                 });
-        attachTimeView(timeHomeView);
+        timeHomePull =
+                new PullRefreshLayout(this, timeHomeView, timeHomeView, timeHomePage::refresh);
+        attachTimeView(timeHomePull);
         restoreTimeHomePosition();
     }
 
@@ -4463,6 +4547,8 @@ public final class MainActivity extends Activity
         return cover;
     }
 
+    private int timeMonthsRevision;
+
     private void showMonths() {
         rememberBrowsingPosition();
         if (timeMonthsDirty && timeMonthsView != null) {
@@ -4490,13 +4576,41 @@ public final class MainActivity extends Activity
         list.setSelector(android.R.color.transparent);
         list.setVerticalScrollBarEnabled(false);
         body.addView(list, new FrameLayout.LayoutParams(-1, -1));
-        layout.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
+        PullRefreshLayout pull =
+                new PullRefreshLayout(
+                        this,
+                        body,
+                        list,
+                        done -> {
+                            timeMonthsPosition = list.getFirstVisiblePosition();
+                            View first = list.getChildAt(0);
+                            timeMonthsOffset = first == null ? 0 : first.getTop();
+                            loadMonths(layout, body, list, done);
+                        });
+        refresh.setOnClickListener(v -> pull.startRefresh());
+        layout.addView(pull, new LinearLayout.LayoutParams(-1, 0, 1));
         content.addView(layout, new FrameLayout.LayoutParams(-1, -1));
+        loadMonths(layout, body, list, null);
+    }
+
+    private void loadMonths(
+            LinearLayout layout,
+            FrameLayout body,
+            ListView list,
+            java.util.function.Consumer<Boolean> done) {
+        int revision = ++timeMonthsRevision;
         final ApiClient monthsClient = api.snapshot();
         async(
                 () -> monthsClient.request("GET", "/api/months", null),
                 result -> {
-                    if (timeMonthsView != layout) return;
+                    if (timeMonthsView != layout || revision != timeMonthsRevision) return;
+                    if (done != null) {
+                        while (body.getChildCount() > 1)
+                            body.removeViewAt(body.getChildCount() - 1);
+                        timeMonthCovers.clear();
+                        list.setVisibility(View.VISIBLE);
+                        done.accept(true);
+                    }
                     JSONArray values = array(result, "months");
                     list.setAdapter(
                             new BaseAdapter() {
@@ -4583,7 +4697,11 @@ public final class MainActivity extends Activity
                     }
                 },
                 failure -> {
-                    if (timeMonthsView != layout) return;
+                    if (timeMonthsView != layout || revision != timeMonthsRevision) return;
+                    if (done != null) {
+                        done.accept(false);
+                        return;
+                    }
                     list.setVisibility(View.GONE);
                     showEmpty(
                             body,
@@ -4635,7 +4753,15 @@ public final class MainActivity extends Activity
         selectedTab = "me";
         currentPage = "me";
         screen(true);
-        if (mePage == null) mePage = new MePage(this, this::myAction);
+        if (mePage == null)
+            mePage =
+                    new MePage(
+                            this,
+                            this::myAction,
+                            done -> {
+                                refreshIdentity();
+                                refreshProfile(done);
+                            });
         content.addView(mePage.createView(), new FrameLayout.LayoutParams(-1, -1));
     }
 
@@ -4808,10 +4934,6 @@ public final class MainActivity extends Activity
 
     @Override
     public void selectBaby(String id) {
-        if (uploadRunning) {
-            toast("这一批照片正在上传，完成后再切换宝宝。");
-            return;
-        }
         if (id.equals(api.childId)) {
             selectedTab = "album";
             showAlbum(false);
@@ -4840,11 +4962,8 @@ public final class MainActivity extends Activity
         clearTimePages();
         if (activeCommentsDialog != null) activeCommentsDialog.dismiss();
         activeCommentsDialog = null;
-        if (uploadProgress != null) {
-            uploadProgress.dismiss();
-            uploadProgress = null;
-        }
-        uploadRunning = false;
+        seenResult = null;
+        albumUploadsChanged = false;
         pendingSave = null;
         if (pendingComparison != null && !pendingComparison.isRecycled())
             pendingComparison.recycle();
@@ -5189,17 +5308,27 @@ public final class MainActivity extends Activity
             toast("当前账号仅可查看相册，不能上传");
             return;
         }
-        if (uploadRunning) {
-            toast("正在上传，请稍等");
+        UploadService.Batch current = UploadService.forAccount(api);
+        if (current != null && current.running) {
+            toast(current.title() + " · " + current.detail(this));
             return;
         }
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         uploadPickerEpoch = accountEpoch;
-        intent.setType("*/*");
-        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {"image/*", "video/*"});
-        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        startActivityForResult(intent, PICK_UPLOAD);
+        boolean systemGallery =
+                Build.VERSION.SDK_INT >= 33
+                        || (Build.VERSION.SDK_INT >= 30
+                                && android.os.ext.SdkExtensions.getExtensionVersion(30) >= 2);
+        if (systemGallery) {
+            Intent gallery = new Intent(MediaStore.ACTION_PICK_IMAGES);
+            gallery.putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX, MediaStore.getPickImagesMaxLimit());
+            try {
+                startActivityForResult(gallery, PICK_UPLOAD);
+                return;
+            } catch (ActivityNotFoundException unavailable) {
+                // Some devices ship without the platform picker.
+            }
+        }
+        startActivityForResult(new Intent(this, PhoneGalleryActivity.class), PICK_UPLOAD);
     }
 
     @Override
@@ -5211,12 +5340,13 @@ public final class MainActivity extends Activity
                 toast("账号或权限已变化，请重新选择要上传的内容");
                 return;
             }
-            ArrayList<Uri> selected = new ArrayList<>();
+            LinkedHashSet<Uri> selected = new LinkedHashSet<>();
             if (data.getClipData() != null) {
                 for (int i = 0; i < data.getClipData().getItemCount(); i++)
                     selected.add(data.getClipData().getItemAt(i).getUri());
             } else if (data.getData() != null) selected.add(data.getData());
-            if (!selected.isEmpty()) chooseUploadChildren(selected);
+            selected.remove(null);
+            if (!selected.isEmpty()) chooseUploadChildren(new ArrayList<>(selected));
         }
     }
 
@@ -5226,184 +5356,120 @@ public final class MainActivity extends Activity
             toast("当前账号不能上传");
             return;
         }
-        if (uploadRunning) {
-            toast("正在上传，请稍等");
-            return;
-        }
         if (selected.isEmpty() || targetChildren.length() == 0) return;
-        final ArrayList<Uri> files = new ArrayList<>(selected);
-        final JSONArray destinations;
+        beginUpload(new UploadService.Batch(selected, api, targetChildren, targetNames));
+    }
+
+    private void beginUpload(UploadService.Batch batch) {
         try {
-            destinations = new JSONArray(targetChildren.toString());
-        } catch (JSONException invalid) {
-            toast("请重新选择要上传的宝宝相册");
+            if (!UploadService.start(this, batch)) {
+                toast("已有一批照片和视频正在上传");
+                return;
+            }
+        } catch (RuntimeException error) {
+            toast("手机暂时无法开始上传，请重新选择照片和视频");
             return;
         }
-        final int uploadEpoch = accountEpoch;
-        final ApiClient uploadClient = api.snapshot();
-        uploadRunning = true;
-        WarmSheet progress = sheet("正在上传");
-        uploadProgress = progress;
-        progress.setCancelable(false);
-        addUploadPreview(progress, files, uploadEpoch);
-        ProgressBar bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        bar.setMax(files.size());
-        bar.setProgressTintList(android.content.res.ColorStateList.valueOf(Ui.ACCENT));
-        bar.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(Ui.SOFT));
-        LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(-1, dp(12));
-        barParams.topMargin = dp(20);
-        barParams.bottomMargin = dp(8);
-        progress.body.addView(bar, barParams);
-        TextView processed =
-                SecondaryUi.note(this, progress.body, "已处理 0 项，共 " + files.size() + " 项");
-        processed.setGravity(Gravity.CENTER);
-        processed.setTextColor(Ui.INK);
-        TextView resultCounts =
-                SecondaryUi.note(this, progress.body, "上传到“" + targetNames + "”的相册");
-        resultCounts.setGravity(Gravity.CENTER);
-        SecondaryUi.note(this, progress.body, "请保持当前页面打开").setGravity(Gravity.CENTER);
-        progress.show();
-        Window window = progress.dialog.getWindow();
-        if (window != null) {
-            window.setGravity(Gravity.CENTER);
-            window.setLayout(
-                    Math.min(dp(360), getResources().getDisplayMetrics().widthPixels - dp(36)), -2);
+        toast("已开始上传，可以继续浏览相册");
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                        != android.content.pm.PackageManager.PERMISSION_GRANTED
+                && !getPreferences(MODE_PRIVATE).getBoolean("asked_upload_notifications", false)) {
+            getPreferences(MODE_PRIVATE)
+                    .edit()
+                    .putBoolean("asked_upload_notifications", true)
+                    .apply();
+            requestPermissions(new String[] {android.Manifest.permission.POST_NOTIFICATIONS}, 32);
         }
-        work.execute(
+    }
+
+    private void addUploadStrip() {
+        uploadStrip = Ui.column(this);
+        uploadStrip.setPadding(dp(16), dp(6), dp(16), dp(6));
+        uploadStrip.setBackgroundColor(Ui.SOFT);
+        uploadLabel = text("", 13, Ui.INK);
+        uploadStrip.addView(uploadLabel);
+        uploadBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        uploadBar.setMax(100);
+        uploadBar.setProgressTintList(android.content.res.ColorStateList.valueOf(Ui.ACCENT));
+        uploadStrip.addView(uploadBar, new LinearLayout.LayoutParams(-1, dp(5)));
+        uploadStrip.setOnClickListener(v -> showUploadResult());
+        root.addView(uploadStrip, new LinearLayout.LayoutParams(-1, -2));
+        renderUpload();
+    }
+
+    private void renderUpload() {
+        UploadService.Batch batch = UploadService.forAccount(api);
+        if (batch != null && !batch.running && seenResult != batch) {
+            seenResult = batch;
+            if (batch.processed > batch.failed.size()) {
+                albumUploadsChanged = true;
+                timeContentChanged();
+                if (!api.childId.isEmpty()) refreshProfile();
+            }
+        }
+        if (uploadStrip == null) return;
+        uploadStrip.setVisibility(batch == null ? View.GONE : View.VISIBLE);
+        if (batch == null) return;
+        uploadLabel.setText(batch.title() + " · " + batch.detail(this));
+        uploadStrip.setClickable(!batch.running);
+        uploadBar.setVisibility(batch.running ? View.VISIBLE : View.GONE);
+        int percent = UploadTransfer.percent(batch.bytes, batch.size);
+        uploadBar.setIndeterminate(percent < 0 || batch.saving);
+        uploadBar.setProgress(Math.max(0, percent));
+    }
+
+    private void showUploadResult() {
+        UploadService.Batch batch = UploadService.forAccount(api);
+        if (batch == null || batch.running) return;
+        WarmSheet done = sheet(batch.failed.isEmpty() && batch.unconfirmed == 0 ? "上传完成" : "上传结果");
+        SecondaryUi.note(this, done.body, batch.title() + " · " + batch.targets);
+        if (batch.unconfirmed > 0)
+            SecondaryUi.note(
+                    this, done.body, "有 " + batch.unconfirmed + " 项已发出，未收到相册确认。请先到相册查看，以免重复上传。");
+        if (!batch.failed.isEmpty()) {
+            SecondaryUi.note(this, done.body, batch.error);
+            done.primary(
+                    "只重试未完成的 " + batch.failed.size() + " 项",
+                    () -> {
+                        done.dismiss();
+                        if (UploadService.forAccount(api) == batch)
+                            beginUpload(
+                                    new UploadService.Batch(
+                                            batch.failed,
+                                            batch.client,
+                                            batch.children,
+                                            batch.targets));
+                    });
+        } else
+            done.primary(
+                    "查看相册",
+                    () -> {
+                        done.dismiss();
+                        UploadService.forget(this, api);
+                        trashMode = false;
+                        showAlbum(true);
+                    });
+        done.secondary(
+                "收起结果",
                 () -> {
-                    int completed = 0, failed = 0;
-                    String lastError = "";
-                    for (Uri source : files) {
-                        if (destroyed || uploadEpoch != accountEpoch) break;
-                        try {
-                            String mime = getContentResolver().getType(source);
-                            if (mime == null) throw new IOException("无法识别所选文件");
-                            String name = displayName(source, mime);
-                            String captured = captureTime(source, mime);
-                            uploadClient.upload(source, name, mime, captured, destinations);
-                            completed++;
-                        } catch (Exception e) {
-                            failed++;
-                            lastError = errorText(e);
-                        }
-                        int current = completed + failed, succeeded = completed, errors = failed;
-                        handler.post(
-                                () -> {
-                                    if (!destroyed
-                                            && uploadEpoch == accountEpoch
-                                            && progress.isShowing()) {
-                                        bar.setProgress(current);
-                                        processed.setText(
-                                                "已处理 " + current + " 项，共 " + files.size() + " 项");
-                                        resultCounts.setText(
-                                                "已上传 "
-                                                        + succeeded
-                                                        + " 项"
-                                                        + (errors > 0
-                                                                ? " · " + errors + " 项未完成"
-                                                                : ""));
-                                    }
-                                });
-                    }
-                    int success = completed, errors = failed;
-                    String message = lastError;
-                    handler.post(
-                            () -> {
-                                if (destroyed || uploadEpoch != accountEpoch) return;
-                                uploadRunning = false;
-                                uploadProgress = null;
-                                progress.dismiss();
-                                timeContentChanged();
-                                refreshProfile();
-                                resetAlbum();
-                                selectedTab = "album";
-                                trashMode = false;
-                                filter = "all";
-                                selectedMonth = "";
-                                selectedDate = "";
-                                favoritesOnly = false;
-                                showAlbum(false);
-                                WarmSheet done = sheet(errors == 0 ? "上传完成" : "部分内容未完成");
-                                TextView summary =
-                                        SecondaryUi.note(
-                                                this, done.body, "已上传 " + success + " 项照片和视频");
-                                summary.setTextSize(18);
-                                summary.setTextColor(Ui.INK);
-                                if (errors > 0) {
-                                    SecondaryUi.note(
-                                            this, done.body, "还有 " + errors + " 项未完成。" + message);
-                                    SecondaryUi.note(this, done.body, "已上传的内容会保留，未完成的内容请稍后重新选择上传。");
-                                }
-                                done.primary("返回相册", done::dismiss);
-                                done.show();
-                            });
+                    done.dismiss();
+                    UploadService.forget(this, api);
                 });
+        done.show();
     }
 
-    private String displayName(Uri uri, String mime) {
-        try (Cursor cursor =
-                getContentResolver()
-                        .query(
-                                uri,
-                                new String[] {OpenableColumns.DISPLAY_NAME},
-                                null,
-                                null,
-                                null)) {
-            if (cursor != null && cursor.moveToFirst()) {
-                String name = cursor.getString(0);
-                if (name != null && !name.isEmpty()) return name;
-            }
-        } catch (Exception ignored) {
-        }
-        return "家庭记录" + (mime.startsWith("video") ? ".mp4" : ".jpg");
+    @Override
+    protected void onStart() {
+        super.onStart();
+        UploadService.observe(uploadObserver);
+        renderUpload();
     }
 
-    private String captureTime(Uri uri, String mime) {
-        // MediaStore dates are absolute instants, unlike EXIF values without a time zone.
-        try (Cursor cursor =
-                getContentResolver()
-                        .query(
-                                uri,
-                                new String[] {MediaStore.MediaColumns.DATE_TAKEN},
-                                null,
-                                null,
-                                null)) {
-            if (cursor != null && cursor.moveToFirst() && cursor.getLong(0) > 0) {
-                return Instant.ofEpochMilli(cursor.getLong(0)).toString();
-            }
-        } catch (Exception ignored) {
-        }
-        try {
-            if (mime.startsWith("image"))
-                try (InputStream stream = getContentResolver().openInputStream(uri)) {
-                    ExifInterface exif = new ExifInterface(stream);
-                    String value = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL);
-                    String offset = exif.getAttribute("OffsetTimeOriginal");
-                    if (value != null && offset != null)
-                        return LocalDateTime.parse(
-                                        value, DateTimeFormatter.ofPattern("yyyy:MM:dd HH:mm:ss"))
-                                .atOffset(ZoneOffset.of(offset.trim()))
-                                .toString();
-                }
-            if (mime.startsWith("video")) {
-                MediaMetadataRetriever retriever = new MediaMetadataRetriever();
-                try {
-                    retriever.setDataSource(this, uri);
-                    String date =
-                            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE);
-                    if (date != null) {
-                        try {
-                            return Instant.parse(date).toString();
-                        } catch (Exception ignored) {
-                        }
-                    }
-                } finally {
-                    retriever.release();
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return null;
+    @Override
+    protected void onStop() {
+        UploadService.unobserve(uploadObserver);
+        super.onStop();
     }
 
     private void saveMedia(JSONObject item) {
@@ -5675,6 +5741,7 @@ public final class MainActivity extends Activity
                                                             updated.optJSONObject("permissions")));
                     member = updated;
                     rememberMember();
+                    if (mePage != null) mePage.refreshFamily();
                     if (routePasswordChangeIfNeeded()) return;
                     if (changed) {
                         toast("家人权限已更新，正在刷新宝宝相册");
@@ -5713,17 +5780,15 @@ public final class MainActivity extends Activity
             disposeMemoryFeatures();
             disposeSocialPages();
             clearTimePages();
-            if (uploadProgress != null) {
-                uploadProgress.dismiss();
-                uploadProgress = null;
-            }
-            uploadRunning = false;
+            seenResult = null;
+            albumUploadsChanged = false;
             profile = new JSONObject();
             resetAlbum();
             displayOrder.clear();
             detailItems.clear();
             images.close();
             images = new ImageLoader(this, api);
+            UploadService.forget(this, api);
             accounts.showRequiredPassword();
         }
         return true;
@@ -5799,11 +5864,9 @@ public final class MainActivity extends Activity
         disposeSocialPages();
         clearTimePages();
         identityRefreshBusy = false;
-        if (uploadProgress != null) {
-            uploadProgress.dismiss();
-            uploadProgress = null;
-        }
-        uploadRunning = false;
+        seenResult = null;
+        albumUploadsChanged = false;
+        UploadService.forget(this, api);
         api.configure(address);
         api.saveLogin(token);
         member = loggedMember;
@@ -5850,6 +5913,7 @@ public final class MainActivity extends Activity
     }
 
     private void clearSession(boolean revoke) {
+        UploadService.forget(this, api);
         final ApiClient previous = api.snapshot();
         dismissSecondarySheets();
         accountEpoch++;
@@ -5857,11 +5921,8 @@ public final class MainActivity extends Activity
         disposeSocialPages();
         clearTimePages();
         identityRefreshBusy = false;
-        if (uploadProgress != null) {
-            uploadProgress.dismiss();
-            uploadProgress = null;
-        }
-        uploadRunning = false;
+        seenResult = null;
+        albumUploadsChanged = false;
         api.logout();
         member = new JSONObject();
         babies = new JSONArray();
