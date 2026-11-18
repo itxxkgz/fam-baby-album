@@ -1,5 +1,6 @@
 """Real queue and upload checks using only temporary synthetic family albums."""
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import io
 import os
@@ -90,6 +91,34 @@ class AdminImportTests(unittest.TestCase):
                 return result
             time.sleep(0.04)
         self.fail('Import did not reach expected state: ' + repr(self.service.get_job(job)))
+
+    def test_concurrent_legacy_import_migration_preserves_jobs_and_files(self):
+        from admin_imports import AdminImportService
+
+        self.unlock()
+        job = self.create('历史导入')
+        payload = self.photo()
+        self.upload(job, payload)
+        with self.app.database() as db:
+            original_job = dict(db.execute('SELECT * FROM admin_import_jobs WHERE id=?', (job,)).fetchone())
+            original_items = [dict(row) for row in db.execute('SELECT * FROM admin_import_items WHERE job_id=?', (job,))]
+            db.execute('ALTER TABLE admin_import_jobs DROP COLUMN child_ids_json')
+
+        ready = threading.Barrier(4)
+
+        def initialize(_):
+            ready.wait(timeout=10)
+            return AdminImportService(self.app)
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            services = list(pool.map(initialize, range(4)))
+        for service in services:
+            self.addCleanup(service.stop)
+            self.assertEqual(service.get_job(job)['status'], 'receiving')
+        with self.app.database() as db:
+            self.assertEqual(dict(db.execute('SELECT * FROM admin_import_jobs WHERE id=?', (job,)).fetchone()), original_job)
+            self.assertEqual([dict(row) for row in db.execute('SELECT * FROM admin_import_items WHERE job_id=?', (job,))], original_items)
+        self.assertEqual((self.service.staging / original_items[0]['staged_path']).read_bytes(), payload)
 
     def test_admin_only_and_first_password_gate(self):
         self.assertEqual(self.client.get('/api/admin/imports').status_code, 401)

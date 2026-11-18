@@ -87,6 +87,8 @@ class AdminImportService:
         except (ValueError, TypeError):
             raise RuntimeError('导入目录设置无效，请使用绝对目录组成的列表。') from None
         with ctx.database() as db:
+            # Serialize the schema check and migration across starting workers.
+            db.execute('BEGIN IMMEDIATE')
             db.execute('''CREATE TABLE IF NOT EXISTS admin_import_jobs (
                 id TEXT PRIMARY KEY,name TEXT NOT NULL,source TEXT NOT NULL,status TEXT NOT NULL,
                 member_id TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,

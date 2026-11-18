@@ -440,6 +440,8 @@ class StorageManager:
         except (ValueError, TypeError):
             raise StorageError("存储密钥文件无法使用，请从备份恢复；不要删除后重新生成", 500) from None
         with self.database() as db:
+            # Another worker must finish migrating before we inspect these columns.
+            db.execute("BEGIN IMMEDIATE")
             db.execute("""CREATE TABLE IF NOT EXISTS storage_configs (
                 id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL,
                 config_json TEXT NOT NULL, credentials_ciphertext TEXT,

@@ -295,16 +295,20 @@ class AccountOnboardingTests(unittest.TestCase):
         environment.update(self.environment)
 
         def start(_):
-            return subprocess.run([sys.executable, '-X', 'utf8', '-c', 'import app'], cwd=server,
+            script = "import app; print(app.storage_manager.fernet.encrypt(b'synthetic-startup-check').decode())"
+            return subprocess.run([sys.executable, '-X', 'utf8', '-c', script], cwd=server,
                                   env=environment, capture_output=True, text=True, encoding='utf-8', timeout=30)
 
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            results = list(pool.map(start, range(2)))
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(start, range(4)))
         for result in results:
             self.assertEqual(result.returncode, 0, result.stderr)
         app, client = self.load_album()
         with app.database() as connection:
             self.assertEqual(connection.execute('SELECT COUNT(*) FROM members').fetchone()[0], 1)
+            self.assertEqual(connection.execute('SELECT COUNT(*) FROM storage_configs').fetchone()[0], 1)
+        for result in results:
+            self.assertEqual(app.storage_manager.fernet.decrypt(result.stdout.strip().encode()), b'synthetic-startup-check')
         self.assertTrue(self.login(client)[0]['password_change_required'])
 
 
